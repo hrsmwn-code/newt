@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/fosrl/newt/fallback"
 	"github.com/fosrl/newt/logger"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
@@ -149,6 +150,10 @@ type SharedBind struct {
 	// Rebinding state - used to keep receive goroutines alive during socket transition
 	rebinding     bool       // true when socket is being replaced
 	rebindingCond *sync.Cond // signaled when rebind completes
+
+	// fork: TCP 443 fallback (see fallback_hook.go)
+	fbMu   sync.Mutex
+	fbSock atomic.Pointer[fallback.Socket]
 }
 
 // MagicResponseCallback is the function signature for magic packet response callbacks
@@ -269,6 +274,7 @@ func (b *SharedBind) closeConnection() error {
 
 	// Signal all goroutines to stop
 	close(b.closeChan)
+	b.closeFallback() // fork: TCP 443 fallback
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -447,6 +453,10 @@ func (b *SharedBind) SetMagicResponseCallback(callback MagicResponseCallback) {
 func (b *SharedBind) WriteToUDP(data []byte, addr *net.UDPAddr) (int, error) {
 	if b.closed.Load() {
 		return 0, net.ErrClosed
+	}
+
+	if b.fallbackIntercept(data, addr.AddrPort()) { // fork: TCP 443 fallback
+		return len(data), nil
 	}
 
 	b.mu.RLock()
@@ -867,6 +877,11 @@ func (b *SharedBind) Send(bufs [][]byte, ep wgConn.Endpoint) error {
 			return nil
 		}
 		// Fall through to socket if netstack conn not available
+	}
+
+	// fork: TCP 443 fallback
+	if bufs = b.fallbackFilter(bufs, destAddrPort); len(bufs) == 0 {
+		return nil
 	}
 
 	// Send through the physical UDP socket (for hole-punched clients)

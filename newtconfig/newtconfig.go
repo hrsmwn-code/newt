@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fosrl/newt/fallback"
 	"github.com/fosrl/newt/logger"
 	"github.com/fosrl/newt/network"
 	newtpkg "github.com/fosrl/newt/newt"
@@ -99,6 +100,8 @@ type fileSettings struct {
 	Region            *string `json:"region"`
 	MetricsAsyncBytes *bool   `json:"metricsAsyncBytes"`
 	PprofEnabled      *bool   `json:"pprof"`
+
+	fallback.FileSettings // fork: TCP 443 fallback
 }
 
 // resolveConfigFilePath determines the settings/credentials file path using
@@ -349,6 +352,7 @@ func Load(opts Options) (newtpkg.Config, error) {
 		AuthDaemonPrincipalsFile: "/var/run/auth-daemon/principals",
 		AuthDaemonCACertPath:     "/etc/ssh/ca.pem",
 		AdminAddr:                "127.0.0.1:2112",
+		Fallback:                 fallback.DefaultSettings(), // fork
 	}
 
 	mtuStr := "1280"
@@ -430,6 +434,7 @@ func Load(opts Options) (newtpkg.Config, error) {
 		applyStr(&cfg.Region, fileCfg.Region, "region", sources, sourceFile)
 		applyBool(&cfg.MetricsAsyncBytes, fileCfg.MetricsAsyncBytes, "metrics-async-bytes", sources, sourceFile)
 		applyBool(&cfg.PprofEnabled, fileCfg.PprofEnabled, "pprof", sources, sourceFile)
+		cfg.Fallback.ApplyFile(fileCfg.FileSettings) // fork
 	}
 
 	// ---- layer 2: environment variables ----
@@ -521,6 +526,8 @@ func Load(opts Options) (newtpkg.Config, error) {
 	applyEnvBoolAlias(&cfg.MetricsAsyncBytes, "NEWT_METRICS_ASYNC_BYTES", "SITE_METRICS_ASYNC_BYTES", "metrics-async-bytes", sources)
 	applyEnvBoolAlias(&cfg.PprofEnabled, "NEWT_PPROF_ENABLED", "SITE_PPROF_ENABLED", "pprof", sources)
 
+	cfg.Fallback.ApplyEnv() // fork
+
 	// ---- layer 3: CLI flags (always registered; default = file/env-resolved value) ----
 	origEndpoint, origID, origSecret := cfg.Endpoint, cfg.ID, cfg.Secret
 	origMTU, origDNS, origLogLevel := mtuStr, cfg.DNS, cfg.LogLevel
@@ -594,6 +601,8 @@ func Load(opts Options) (newtpkg.Config, error) {
 	fs.StringVar(&cfg.AuthDaemonPrincipalsFile, "ad-principals-file", cfg.AuthDaemonPrincipalsFile, "Path to the principals file for auth daemon")
 	fs.StringVar(&cfg.AuthDaemonCACertPath, "ad-ca-cert-path", cfg.AuthDaemonCACertPath, "Path to the CA certificate file for auth daemon")
 	fs.BoolVar(&cfg.AuthDaemonGenerateRandomPassword, "ad-generate-random-password", cfg.AuthDaemonGenerateRandomPassword, "Generate a random password for authenticated users")
+
+	cfg.Fallback.RegisterFlags(fs) // fork
 
 	version := fs.Bool("version", false, "Print the version")
 	showConfig := fs.Bool("show-config", false, "Show configuration values and their sources, then exit")
@@ -717,6 +726,9 @@ func Load(opts Options) (newtpkg.Config, error) {
 	cfg.UDPProxyIdleTimeout = parseDurationEnvOrFlag(udpProxyIdleTimeoutStr, 90*time.Second, "NEWT_UDP_PROXY_IDLE_TIMEOUT")
 
 	if err := validateTLSConfig(cfg); err != nil {
+		return newtpkg.Config{}, err
+	}
+	if err := cfg.Fallback.Validate(); err != nil { // fork
 		return newtpkg.Config{}, err
 	}
 
