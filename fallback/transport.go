@@ -385,7 +385,14 @@ func (s *Socket) Intercept(data []byte, dst netip.AddrPort) bool {
 		// which must never send UDP at all
 		return t.settings.Mode == ModeTCP
 	}
-	if pathState(t.state.Load()) == stateWS {
+	switch pathState(t.state.Load()) {
+	case stateUndecided:
+		// Auto mode before the first echo probe finished: don't let early
+		// hole punches register a UDP endpoint we may abandon a moment
+		// later. Dropping is safe: hole punches repeat and WireGuard
+		// retransmits handshakes.
+		return true
+	case stateWS:
 		ip := dst.Addr().Unmap()
 		if p := s.lastDst.Load(); p == nil || *p != ip {
 			s.lastDst.Store(&ip)

@@ -25,6 +25,9 @@ func (b *SharedBind) fallbackSocket() *fallback.Socket {
 	}
 	b.fbMu.Lock()
 	defer b.fbMu.Unlock()
+	if b.fbClosed.Load() || b.closed.Load() {
+		return nil
+	}
 	if s := b.fbSock.Load(); s != nil {
 		return s
 	}
@@ -57,7 +60,8 @@ func (b *SharedBind) injectFromRelay(data []byte, from netip.AddrPort) {
 func (b *SharedBind) fallbackIntercept(data []byte, dst netip.AddrPort) bool {
 	s := b.fallbackSocket()
 	if s == nil {
-		return false
+		// closed in tcp mode: still never fall through to UDP
+		return (b.fbClosed.Load() || b.closed.Load()) && fallback.Default().ForceRelay()
 	}
 	if dst.Addr().Is4In6() {
 		dst = netip.AddrPortFrom(dst.Addr().Unmap(), dst.Port())
@@ -83,6 +87,7 @@ func (b *SharedBind) fallbackFilter(bufs [][]byte, dst netip.AddrPort) [][]byte 
 // closeFallback closes the fallback socket (and its relay connection).
 func (b *SharedBind) closeFallback() {
 	b.fbMu.Lock()
+	b.fbClosed.Store(true)
 	s := b.fbSock.Swap(nil)
 	b.fbMu.Unlock()
 	if s != nil {

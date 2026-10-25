@@ -206,6 +206,78 @@ func TestFallbackTCPDropsPeerToPeerUDP(t *testing.T) {
 	expectNoUDP(t, peer)
 }
 
+func magicRequest() []byte {
+	req := make([]byte, MagicTestRequestLen)
+	copy(req, MagicTestRequest)
+	copy(req[len(MagicTestRequest):], "12345678")
+	return req
+}
+
+func TestFallbackTCPMagicRequestOverUDPGetsNoUDPReply(t *testing.T) {
+	installTCPTransport(t)
+	b := newBind(t)
+	fns, port, err := b.Open(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	startReceivers(t, fns)
+
+	peer, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 2)})
+	if err != nil {
+		t.Skip("127.0.0.2 not available")
+	}
+	defer peer.Close()
+	if _, err := peer.WriteToUDP(magicRequest(), &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: int(port)}); err != nil {
+		t.Fatal(err)
+	}
+	expectNoUDP(t, peer)
+}
+
+func TestFallbackTCPMagicRequestViaRelayIsAnsweredViaRelay(t *testing.T) {
+	server := installTCPTransport(t)
+	gerbil, gport := udpListener(t)
+	b := newBind(t)
+	fns, _, err := b.Open(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rx := startReceivers(t, fns)
+	// prime the relay link so replies are attributed to the server
+	if _, err := b.WriteToUDP([]byte("prime"), net.UDPAddrFromAddrPort(netip.AddrPortFrom(server, gport))); err != nil {
+		t.Fatal(err)
+	}
+	next(t, rx)
+
+	// a magic request arriving over the relay is answered over the relay
+	// (the echo relay then bounces the response back to us), never UDP
+	b.injectFromRelay(magicRequest(), netip.AddrPortFrom(server, gport))
+	expectNoUDP(t, gerbil)
+}
+
+func TestFallbackCloseRaceDoesNotLeakSocket(t *testing.T) {
+	installTCPTransport(t)
+	for i := 0; i < 200; i++ {
+		c, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero})
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := New(c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			_, _ = b.WriteToUDP([]byte("x"), &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 9})
+		}()
+		_ = b.Close()
+		<-done
+		if b.fbSock.Load() != nil {
+			t.Fatal("fallback socket created after/while closing")
+		}
+	}
+}
+
 func TestFallbackNoTransportIsUpstreamBehaviour(t *testing.T) {
 	fallback.Install(nil)
 	gerbil, gport := udpListener(t)
