@@ -278,6 +278,57 @@ func TestFallbackCloseRaceDoesNotLeakSocket(t *testing.T) {
 	}
 }
 
+func TestFallbackTCPClosedBindNeverSendsUDP(t *testing.T) {
+	server := installTCPTransport(t)
+	gerbil, gport := udpListener(t)
+	ep := &wgConn.StdNetEndpoint{AddrPort: netip.AddrPortFrom(server, gport)}
+
+	b := newBind(t)
+	if _, _, err := b.Open(0); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate the window where closeFallback has run but the UDP socket
+	// is still open (Send passed its closed check just before).
+	b.closeFallback()
+	if err := b.Send([][]byte{[]byte("late")}, ep); err != nil && err != net.ErrClosed {
+		t.Fatalf("unexpected error %v", err)
+	}
+	if _, err := b.WriteToUDP([]byte("late"), net.UDPAddrFromAddrPort(ep.AddrPort)); err != nil && err != net.ErrClosed {
+		t.Fatalf("unexpected error %v", err)
+	}
+	expectNoUDP(t, gerbil)
+}
+
+// Not run with -race: concurrent Send/Close also exercises upstream's
+// unsynchronised `b.netstackEndpoints = sync.Map{}` in closeConnection,
+// which is an upstream race outside this fork's hooks.
+func TestFallbackTCPSendCloseRace(t *testing.T) {
+	if raceEnabled {
+		t.Skip("hits upstream SharedBind.closeConnection race on netstackEndpoints")
+	}
+	server := installTCPTransport(t)
+	gerbil, gport := udpListener(t)
+	ep := &wgConn.StdNetEndpoint{AddrPort: netip.AddrPortFrom(server, gport)}
+	for i := 0; i < 200; i++ {
+		c, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero})
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := New(c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			_ = b.Send([][]byte{[]byte("x")}, ep)
+		}()
+		_ = b.Close()
+		<-done
+	}
+	expectNoUDP(t, gerbil)
+}
+
 func TestFallbackNoTransportIsUpstreamBehaviour(t *testing.T) {
 	fallback.Install(nil)
 	gerbil, gport := udpListener(t)

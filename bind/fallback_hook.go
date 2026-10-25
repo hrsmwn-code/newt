@@ -73,6 +73,9 @@ func (b *SharedBind) fallbackIntercept(data []byte, dst netip.AddrPort) bool {
 // dst; the others were handled by the fallback.
 func (b *SharedBind) fallbackFilter(bufs [][]byte, dst netip.AddrPort) [][]byte {
 	if b.fallbackSocket() == nil {
+		if (b.fbClosed.Load() || b.closed.Load()) && fallback.Default().ForceRelay() {
+			return nil // closing in tcp mode: never fall through to UDP
+		}
 		return bufs
 	}
 	pass := bufs[:0:0]
