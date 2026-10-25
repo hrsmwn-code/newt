@@ -151,8 +151,9 @@ type SharedBind struct {
 	rebindingCond *sync.Cond // signaled when rebind completes
 
 	// fork: TCP 443 fallback (see fallback_hook.go)
-	fbMu   sync.Mutex
-	fbSock atomic.Pointer[fallback.Socket]
+	fbMu     sync.Mutex
+	fbSock   atomic.Pointer[fallback.Socket]
+	fbClosed atomic.Bool
 }
 
 // MagicResponseCallback is the function signature for magic packet response callbacks
@@ -723,6 +724,11 @@ func (b *SharedBind) handleMagicPacket(data []byte, addr *net.UDPAddr) bool {
 		response := make([]byte, MagicTestResponseLen)
 		copy(response, MagicTestResponse)
 		copy(response[len(MagicTestResponse):], echoData)
+
+		// fork: TCP 443 fallback (relay or drop in tcp mode)
+		if b.fallbackIntercept(response, addr.AddrPort()) {
+			return true
+		}
 
 		// Send response back to sender
 		b.mu.RLock()
