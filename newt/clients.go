@@ -52,6 +52,7 @@ func (n *Newt) setupClients() {
 
 	n.client.OnTokenUpdate(func(token string) {
 		n.wgService.SetToken(token)
+		n.fallbackCredentials(token) // fork: TCP 443 fallback
 	})
 
 	n.ready = true
