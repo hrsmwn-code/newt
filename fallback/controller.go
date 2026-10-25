@@ -28,6 +28,9 @@ type timings struct {
 	probeMin         time.Duration // first re-probe interval while on WS
 	probeMax         time.Duration // cap for re-probe backoff
 	handshakeTimeout time.Duration // no handshake response on UDP -> fall back
+	// once a handshake has succeeded, tolerate ~3 lost handshakes (wireguard
+	// retries every 5 s) before treating UDP as broken
+	establishedHandshakeTimeout time.Duration
 }
 
 func defaultTimings() timings {
@@ -36,6 +39,8 @@ func defaultTimings() timings {
 		probeMin:         30 * time.Second,
 		probeMax:         10 * time.Minute,
 		handshakeTimeout: 10 * time.Second,
+
+		establishedHandshakeTimeout: 20 * time.Second,
 	}
 }
 
@@ -56,6 +61,7 @@ type controller struct {
 	// handshake watchdog: first unanswered handshake initiation sent over UDP
 	handshakePending   bool
 	handshakeFirstSent time.Time
+	established        bool // a handshake response arrived over UDP since the last switch
 
 	// probation: we switched back to UDP because the echo worked, but no
 	// handshake has confirmed it yet. A handshake timeout during probation
@@ -89,6 +95,7 @@ func (c *controller) setState(s pathState, reason string) {
 	c.lastReason = reason
 	c.handshakePending = false
 	c.probation = false
+	c.established = false
 }
 
 // tick advances timers. It returns true when the caller should start an echo
@@ -98,7 +105,11 @@ func (c *controller) tick(now time.Time) bool {
 		return false
 	}
 
-	if c.state == stateUDP && c.handshakePending && !now.Before(c.handshakeFirstSent.Add(c.tm.handshakeTimeout)) {
+	timeout := c.tm.handshakeTimeout
+	if c.established && c.tm.establishedHandshakeTimeout > timeout {
+		timeout = c.tm.establishedHandshakeTimeout
+	}
+	if c.state == stateUDP && c.handshakePending && !now.Before(c.handshakeFirstSent.Add(timeout)) {
 		onProbation := c.probation
 		c.setState(stateWS, "no WireGuard handshake response from the server over UDP")
 		if onProbation {
@@ -184,6 +195,7 @@ func (c *controller) onServerRecv(handshakeResponse bool, now time.Time) {
 	}
 	if handshakeResponse {
 		c.handshakePending = false
+		c.established = true
 		if c.probation {
 			c.probation = false
 			c.backoff = c.tm.probeMin

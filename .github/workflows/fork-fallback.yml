@@ -77,11 +77,19 @@ jobs:
             })
 
   image:
-    if: github.event_name == 'push'
+    # Runs after a scheduled/manual rebase (a GITHUB_TOKEN push does not
+    # trigger another workflow run) and on manual pushes to fallback.
+    needs: [rebase]
+    if: >-
+      always() &&
+      (github.event_name == 'push' ||
+       (needs.rebase.result == 'success' &&
+        (needs.rebase.outputs.changed == 'true' || github.event_name == 'workflow_dispatch')))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: fallback
           fetch-depth: 0
       - name: Version
         id: v

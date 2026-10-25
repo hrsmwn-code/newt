@@ -217,3 +217,23 @@ func TestControllerProbeResultIgnoredWhenNotRequested(t *testing.T) {
 		t.Fatal("tcp mode ignores probe results")
 	}
 }
+
+func TestControllerEstablishedTunnelToleratesShortHandshakeLoss(t *testing.T) {
+	tm := defaultTimings()
+	c := newController(ModeAuto, tm)
+	c.tick(t0)
+	c.onProbeResult(true, t0)
+	c.onHandshakeSent(t0)
+	c.onServerRecv(true, t0.Add(time.Second)) // tunnel established
+
+	later := t0.Add(2 * time.Minute)
+	c.onHandshakeSent(later)
+	c.tick(later.Add(tm.handshakeTimeout))
+	if c.state != stateUDP {
+		t.Fatal("an established tunnel must not fall back after one initial-timeout window")
+	}
+	c.tick(later.Add(tm.establishedHandshakeTimeout))
+	if c.state != stateWS {
+		t.Fatal("an established tunnel falls back after the longer timeout")
+	}
+}

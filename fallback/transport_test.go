@@ -46,6 +46,8 @@ func fastTimings() timings {
 		probeMin:         200 * time.Millisecond,
 		probeMax:         400 * time.Millisecond,
 		handshakeTimeout: 300 * time.Millisecond,
+
+		establishedHandshakeTimeout: 600 * time.Millisecond,
 	}
 }
 
@@ -302,5 +304,30 @@ func TestDefaultTransport(t *testing.T) {
 	defer Install(nil)
 	if Default() != tr {
 		t.Fatal("Install must set the default transport")
+	}
+}
+
+func TestAutoDropsServerTrafficWhileUndecided(t *testing.T) {
+	fr := newFakeRelay(t)
+	echo := newToggleEcho(t, false)
+	tm := fastTimings()
+	tm.probeTimeout = 2 * time.Second // keep it undecided for a while
+	tr, err := New(Settings{Mode: ModeAuto, RelayPath: "/fallback-relay", EchoPort: echo.port}, fr.srv.URL,
+		withTimings(tm), withTickInterval(20*time.Millisecond), withLinkBackoff(10*time.Millisecond))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tr.Close()
+	tr.AddServerAddr(serverIP)
+	s := tr.NewSocket(func([]byte, netip.AddrPort) {}, false)
+	defer s.Close()
+	if tr.State() != "undecided" {
+		t.Fatalf("expected undecided, got %s", tr.State())
+	}
+	if !s.Intercept([]byte("early"), netip.AddrPortFrom(serverIP, 21820)) {
+		t.Fatal("server traffic before the first decision must not go out over UDP")
+	}
+	if s.Intercept([]byte("p2p"), netip.MustParseAddrPort("192.0.2.7:4000")) {
+		t.Fatal("non-server traffic is unaffected while undecided")
 	}
 }
