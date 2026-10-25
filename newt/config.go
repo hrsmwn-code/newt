@@ -1,6 +1,10 @@
 package newt
 
-import "time"
+import (
+	"time"
+
+	"github.com/fosrl/newt/fallback"
+)
 
 // Config holds all runtime configuration for a Newt instance.
 type Config struct {
@@ -73,4 +77,7 @@ type Config struct {
 
 	// Callbacks
 	OnRestart func() error
+
+	// fork: TCP 443 fallback transport
+	Fallback fallback.Settings
 }

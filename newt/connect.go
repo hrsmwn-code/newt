@@ -114,7 +114,7 @@ func (n *Newt) handleConnect(ctx context.Context, msg websocket.WSMessage) {
 
 	n.setDownstreamTNetstack(n.tnet)
 
-	n.dev = device.NewDevice(n.tun, conn.NewDefaultBind(), device.NewLogger(
+	n.dev = device.NewDevice(n.tun, n.fallbackWrapBind(conn.NewDefaultBind(), n.wgData.Endpoint), device.NewLogger( // fork: fallback
 		util.MapToWireGuardLogLevel(n.loggerLevel),
 		"gerbil-wireguard: ",
 	))

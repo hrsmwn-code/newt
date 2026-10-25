@@ -179,8 +179,12 @@ func (n *Newt) GetTLSClientOpt() websocket.ClientOption {
 // Start sets up all WebSocket handlers, connects to the server, and blocks
 // until ctx is cancelled.
 func (n *Newt) Start(ctx context.Context) {
+	n.setupFallback() // fork: TCP 443 fallback
+	defer n.closeFallback()
 	if !n.config.DisableClients {
 		n.setupClients()
+	} else {
+		n.client.OnTokenUpdate(n.fallbackCredentials) // fork
 	}
 
 	n.connectionBlocked.Store(n.client.GetConfig().Blocked)
