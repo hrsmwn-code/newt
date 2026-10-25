@@ -30,6 +30,7 @@ type Transport struct {
 	tick     time.Duration
 	linkMin  time.Duration
 	tls      *tls.Config
+	dial     func(ctx context.Context, network, addr string) (net.Conn, error)
 
 	mu       sync.Mutex
 	ctrl     *controller
@@ -50,6 +51,12 @@ type Option func(*Transport)
 
 // WithTLSConfig sets the TLS configuration for relay connections.
 func WithTLSConfig(c *tls.Config) Option { return func(t *Transport) { t.tls = c } }
+
+// WithDialer sets the dialer for relay connections (e.g. one that resolves
+// via the physical network's DNS and records the IPs for bypass routes).
+func WithDialer(d func(ctx context.Context, network, addr string) (net.Conn, error)) Option {
+	return func(t *Transport) { t.dial = d }
+}
 
 func withTimings(tm timings) Option           { return func(t *Transport) { t.tm = tm } }
 func withTickInterval(d time.Duration) Option { return func(t *Transport) { t.tick = d } }
@@ -326,6 +333,7 @@ func (t *Transport) NewSocket(deliver func(data []byte, from netip.AddrPort), ve
 		relayURL:    t.relayURL,
 		credentials: t.credentials,
 		tlsConfig:   t.tls,
+		netDial:     t.dial,
 		backoffMin:  t.linkMin,
 		onRecv:      s.recvFromRelay,
 	})
