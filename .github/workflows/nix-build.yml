@@ -6,6 +6,9 @@ on:
     paths:
       - go.mod
       - go.sum
+      - flake.nix
+      - flake.lock
+      - .github/workflows/nix-build.yml
 
 jobs:
   nix-build:
