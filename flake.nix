@@ -25,7 +25,7 @@
           inherit (pkgs) lib;
 
           # Update version when releasing
-          version = "1.19.0";
+          version = "1.20.1-fallback";
         in
         {
           default = self.packages.${system}.pangolin-newt;
@@ -35,7 +35,7 @@
             inherit version;
             src = pkgs.nix-gitignore.gitignoreSource [ ] ./.;
 
-            vendorHash = "sha256-qudAHUCLI0OUEvuki0OeFRhkl5DPaJ6ywL7aWUORA00=";
+            vendorHash = "sha256-AYihZwCkuxRcHqMDnQJJEvbcSxPLLf3ws/vW+1qJBig=";
 
             nativeInstallCheckInputs = [ pkgs.versionCheckHook ];
 
